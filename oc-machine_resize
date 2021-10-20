@@ -291,13 +291,6 @@ cache_get_etcd_field_isleader() {
     jq -r '.[] | ( .Status.header.member_id == .Status.leader  )' ${CACHE_ETCD}
 }
 
-# $1=list $2=string to match
-# list_contains_str() {
-#     [[ ${1} =~ (^|[[:space:]])${2}($|[[:space:]]) ]]\
-#         && RT_RESP=${RT_YES} \
-#         || RT_RESP=${RT_NO}
-# }
-
 cache_get_az_resource_group() {
     jq -r ".items[] \
             | select (\
@@ -802,7 +795,7 @@ cmd_list_machines() {
 # MAIN
 # ####
 function show_help() {
-
+    local progname="oc machine-resize"
     cat <<-EOF
 Usage: ${0} [options]
 
@@ -815,20 +808,21 @@ Available options:
 
 Examples:
     # Install this script
-    curl -so /usr/local/bin/oc-machine_resize \
-        && chmod u+x /usr/local/bin/oc-machine_resize
+    curl -o /usr/local/bin/oc-machine_resize \
+        https://github.com/mtulio/oc-plugin-machine-resize/blob/master/oc-machine_resize \
+    chmod u+x /usr/local/bin/oc-machine_resize
 
     # list available Machines
-    ${0} --list-machines
+    ${progname} --list-machines
 
     # list available sizes for a given Machine
-    ${0} -N machine_name --list-sizes
+    ${progname} -N machine_name --list-sizes
 
     # change machine size in AWS
-    ${0} --machine-name my-master-0 --size m5.xlarge
+    ${progname} --machine-name my-master-0 --size m5.xlarge
 
     # change machine size in Azure
-    ${0} --machine-name my-master-0 --size Standard_D8s_v3
+    ${progname} --machine-name my-master-0 --size Standard_D8s_v3
 
 EOF
 
