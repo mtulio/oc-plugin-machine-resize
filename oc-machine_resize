@@ -51,8 +51,8 @@ set_dep_cloud() {
         declare -g KEY_PATH_MACHINE_ID=".status.providerStatus.instanceId"
 
     elif [[ "${CLOUD_PROVIDER}" == "azure" ]]; then
-        echo " >> WARNING: Azure Platform is under development <<"
         declare -g KEY_PATH_MACHINE_TYPE=".spec.providerSpec.value.vmSize"
+        declare -g KEY_MACHINE_TYPE="vmSize"
         declare -g KEY_PATH_MACHINE_ID=".status.providerStatus.vmId"
     fi
 }
@@ -161,18 +161,20 @@ aws_power_on_instance() {
 # Azure
 # #####
 
-azure_get_instance_state() {
+azure_get_vm_state() {
     local machine_name=${1:-${OPT_MACHINE}}
-    local instance_id=$(cache_get_machine_id ${machine_name})
-    local current_state=$(aws ec2 describe-instance-status \
-        --instance-id ${instance_id} \
-        | jq -r '.InstanceStatuses[0].InstanceState.Name')
+    local resource_group=$(cache_get_az_resource_group)
+    local current_state=$(az vm get-instance-view \
+        --resource-group ${resource_group} \
+        --name ${machine_name} \
+        --output json \
+        | jq -re '.instanceView.statuses[] | select( .code | startswith("PowerState") ).code')
 
-    if [[ ${current_state} == "\"PowerState/stopped\"" ]]; then
+    if [[ ${current_state} == "PowerState/stopped" ]]; then
         echo "not_running"
         return
     fi
-    if [[ ${current_state} == "\"PowerState/running\"" ]]; then
+    if [[ ${current_state} == "PowerState/running" ]]; then
         echo "running"
         return
     fi
@@ -180,19 +182,29 @@ azure_get_instance_state() {
     return
 }
 
-azure_change_instance_type() {
+azure_change_vm_size() {
     local machine_name=${1:-${OPT_MACHINE}}
     local instance_id=$(cache_get_machine_id ${machine_name})
-    local resource_group=""
+    local resource_group=$(cache_get_az_resource_group)
     az vm resize \
         --resource-group ${resource_group} \
         --name ${machine_name} \
         --size ${OPT_SIZE}
 }
 
-# ##
-# OC
-# ##
+azure_power_on_vm() {
+    local machine_name=${1:-${OPT_MACHINE}}
+    local resource_group=$(cache_get_az_resource_group)
+    echo " >> Starting Azure VM ${machine_name}..."
+    az vm start \
+        --resource-group ${resource_group} \
+        --name ${machine_name} \
+        --output table
+}
+
+# #########
+# OC cached
+# #########
 
 cache_update_get_machines() {
     oc get machines \
@@ -279,12 +291,17 @@ cache_get_etcd_field_isleader() {
     jq -r '.[] | ( .Status.header.member_id == .Status.leader  )' ${CACHE_ETCD}
 }
 
-# 1=list 2=string
-list_contains_str() {
-    [[ ${1} =~ (^|[[:space:]])${2}($|[[:space:]]) ]]\
-        && RT_RESP=${RT_YES} \
-        || RT_RESP=${RT_NO}
+cache_get_az_resource_group() {
+    jq -r ".items[] \
+            | select (\
+                .metadata.name==\"${machine_name}\"\
+              ).spec.providerSpec.value.resourceGroup" \
+            ${CACHE_FILE_MACHINES}
 }
+
+# ##########
+# OC Actions
+# ##########
 
 run_oc_cordon_node() {
     local machine_name=${OPT_MACHINE}
@@ -403,7 +420,7 @@ run_wait_node_stopped() {
         if [[ "${CLOUD_PROVIDER}" == "aws" ]]; then
             st=$(aws_get_instance_state)
         elif [[ "${CLOUD_PROVIDER}" == "azure" ]]; then
-            st=$(azure_get_instance_state)
+            st=$(azure_get_vm_state)
         fi
         test $st == "not_running" && break;
         echo " >> Instance still running [$st]; sleeping 15s"
@@ -419,7 +436,7 @@ run_wait_node_started() {
         if [[ "${CLOUD_PROVIDER}" == "aws" ]]; then
             st=$(aws_get_instance_state)
         elif [[ "${CLOUD_PROVIDER}" == "azure" ]]; then
-            st=$(azure_get_instance_state)
+            st=$(azure_get_vm_state)
         fi
         test $st == "running" && break;
         echo " >> Instance still not running [$st]; sleeping 15s"
@@ -434,7 +451,7 @@ run_machine_power_on() {
     if [[ "${CLOUD_PROVIDER}" == "aws" ]]; then
         aws_power_on_instance
     elif [[ "${CLOUD_PROVIDER}" == "azure" ]]; then
-        aws_power_on_vm
+        azure_power_on_vm
     fi
     RT_RESP=${RT_YES}
 }
@@ -444,7 +461,7 @@ run_change_instance_type() {
     if [[ "${CLOUD_PROVIDER}" == "aws" ]]; then
         aws_change_instance_type
     elif [[ "${CLOUD_PROVIDER}" == "azure" ]]; then
-        azure_change_instance_type
+        azure_change_vm_size
     fi
     RT_RESP=${RT_YES}
 }
@@ -508,6 +525,7 @@ check_etcd_leader_by_ip() {
 
 check_machine_was_not_resized_cloud() {
     echo -ne " > Checking ig machine was already resized on Cloud provider..."
+    local machine_name=${1:-${OPT_MACHINE}}
     local machine_type_cloud=$(jq -r \
         ".items[] \
          | select (.metadata.name==\"${OPT_MACHINE}\").metadata.labels.\"machine.openshift.io/instance-type\"" \
@@ -741,10 +759,10 @@ cmd_list_machines() {
     cache_update_get_etcd
 
     echo "Cloud Provider: ${CLOUD_PROVIDER}"
-    printf "%15s \t%15s \t%15s \t\t%10s \t%10s \t%10s \t%10s \t%10s \t%10s\n" \
+    printf "%15s \t%15s \t%15s \t%10s \t%7s \t%10s \t\t%10s \t\t%10s \t\t%10s\n" \
         "MACHINE_NAME" "MACHINE_ID" "NODE_NAME"  \
-        "PHASE" "NODE_STATUS" \
-        "TYPE_SPEC" "TYPE_CLOUD" "RESOURCE_GROUP" \
+        "PHASE" "STATUS" \
+        "TYPE_SPEC" "TYPE_PROVIDER" "RESOURCE_GROUP" \
         "ETCD_LEADER"
 
     for machine_name in $(jq -r '.items[].metadata.name' ${CACHE_FILE_MACHINES}); do
@@ -756,15 +774,15 @@ cmd_list_machines() {
         machine_phase=$(cache_get_machine_phase ${machine_name})
         machine_type_spec=$(jq -r ".items[] |select (.metadata.name==\"${machine_name}\")${KEY_PATH_MACHINE_TYPE}" ${CACHE_FILE_MACHINES})
         machine_type_cloud=$(cache_get_machine_size_cloud ${machine_name})
-        resource_group="N/A"
+        resource_group="\tN/A\t"
         etcd_leader=$(check_etcd_leader_by_ip ${machine_ip})
         
         if [[ "${CLOUD_PROVIDER}" == "azure" ]]; then
             machine_id=${machine_name}
-            resource_group=$(jq -r ".items[] |select (.metadata.name==\"${machine_name}\") | .spec.providerSpec.value.resourceGroup" ${CACHE_FILE_MACHINES})
+            resource_group=$(cache_get_az_resource_group)
         fi
 
-        printf "%15s \t%15s \t%15s \t%10s  \t%10s \t%10s \t%10s \t%10s \t%10s\n" \
+        printf "%15s \t%15s \t%15s \t%10s \t%7s \t%10s \t%10s \t%10s \t%10s\n" \
             ${machine_name} ${machine_id} ${node_name} \
             ${machine_phase} ${node_status} \
             ${machine_type_spec} ${machine_type_cloud} ${resource_group} \
@@ -777,7 +795,7 @@ cmd_list_machines() {
 # MAIN
 # ####
 function show_help() {
-
+    local progname="oc machine-resize"
     cat <<-EOF
 Usage: ${0} [options]
 
@@ -790,20 +808,21 @@ Available options:
 
 Examples:
     # Install this script
-    curl -so /usr/local/bin/oc-machine_resize \
-        && chmod u+x /usr/local/bin/oc-machine_resize
+    curl -o /usr/local/bin/oc-machine_resize \\
+        https://github.com/mtulio/oc-plugin-machine-resize/blob/master/oc-machine_resize
+    chmod u+x /usr/local/bin/oc-machine_resize
 
     # list available Machines
-    ${0} --list-machines
+    ${progname} --list-machines
 
     # list available sizes for a given Machine
-    ${0} -N machine_name --list-sizes
+    ${progname} -N machine_name --list-sizes
 
     # change machine size in AWS
-    ${0} --machine-name my-master-0 --size m5.xlarge
+    ${progname} --machine-name my-master-0 --size m5.xlarge
 
     # change machine size in Azure
-    ${0} --machine-name my-master-0 --size Standard_D8s_v3
+    ${progname} --machine-name my-master-0 --size Standard_D8s_v3
 
 EOF
 

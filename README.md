@@ -11,7 +11,8 @@
 Download the script:
 
 ``` shell
-curl -o /usr/local/bin/oc-machine_resize https://github.com/mtulio/oc-plugin-machine-resize/blob/master/oc-machine_resize
+curl -s https://github.com/mtulio/oc-plugin-machine-resize/blob/master/oc-machine_resize \
+    -o /usr/local/bin/oc-machine_resize
 ```
 
 Grant permissions to run:
@@ -46,8 +47,6 @@ oc machine-resize -h
 
 ## Usage
 
-<script id="asciicast-440747" src="https://asciinema.org/a/440747.js" async></script>
-
 - list current machines
 
 ``` shell
@@ -65,6 +64,15 @@ oc machine-resize -N mrb-gptgl-master-1 -s m5.xlarge
 ``` shell
 oc machine-resize -N mrb-gptgl-master-0 -s m5.xlarge --force
 ```
+
+### Cast: resizing master node that host the etcd leader pod
+
+<script id="asciicast-440747" src="https://asciinema.org/a/440747.js" async></script>
+
+### Cast: resizing the node on Azure
+
+<script id="asciicast-443591" src="https://asciinema.org/a/443591.js" async></script>
+
 
 ## ToDo Next
 
