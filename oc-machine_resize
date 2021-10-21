@@ -808,8 +808,8 @@ Available options:
 
 Examples:
     # Install this script
-    curl -o /usr/local/bin/oc-machine_resize \
-        https://github.com/mtulio/oc-plugin-machine-resize/blob/master/oc-machine_resize \
+    curl -o /usr/local/bin/oc-machine_resize \\
+        https://github.com/mtulio/oc-plugin-machine-resize/blob/master/oc-machine_resize
     chmod u+x /usr/local/bin/oc-machine_resize
 
     # list available Machines
