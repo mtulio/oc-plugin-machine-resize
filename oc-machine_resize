@@ -133,7 +133,7 @@ cache_get_machine_id() {
 aws_get_instance_state() {
     local instance_id
     local current_state
-    instance_id=$(cache_get_machine_id "${1:-${OPT_MACHINE}}")
+    instance_id=$(cache_get_machine_id "${OPT_MACHINE}")
     current_state=$(aws ec2 describe-instance-status \
         --instance-id "${instance_id}" \
         | jq -r '.InstanceStatuses[0].InstanceState.Name')
@@ -191,7 +191,7 @@ aws_change_instance_type() {
 
 aws_power_on_instance() {
     local instance_id
-    instance_id=$(cache_get_machine_id "${1:-${OPT_MACHINE}}")
+    instance_id=$(cache_get_machine_id "${OPT_MACHINE}")
 
     echo " >> Starting EC2..."
     aws ec2 start-instances \
@@ -207,7 +207,7 @@ azure_get_vm_state() {
     local resource_group
     local current_state
 
-    machine_name=${1:-${OPT_MACHINE}}
+    machine_name="${OPT_MACHINE}"
     resource_group=$(cache_get_az_resource_group)
     current_state=$(az vm get-instance-view \
         --resource-group "${resource_group}" \
@@ -234,7 +234,7 @@ azure_change_vm_size() {
     local instance_id
     local resource_group
 
-    machine_name="${1:-${OPT_MACHINE}}"
+    machine_name="${OPT_MACHINE}"
     instance_id=$(cache_get_machine_id "${machine_name}")
     resource_group=$(cache_get_az_resource_group)
 
@@ -248,7 +248,7 @@ azure_power_on_vm() {
     local machine_name
     local resource_group
 
-    machine_name="${1:-${OPT_MACHINE}}"
+    machine_name="${OPT_MACHINE}"
     resource_group=$(cache_get_az_resource_group)
 
     echo " >> Starting Azure VM ${machine_name}..."
@@ -614,10 +614,10 @@ check_machine_was_not_resized_cloud() {
 
     echo -ne " > Checking ig machine was already resized on Cloud provider..."
 
-    machine_name="${1:-${OPT_MACHINE}}"
+    machine_name="${OPT_MACHINE}"
     machine_type_cloud=$(jq -r \
         ".items[] \
-         | select (.metadata.name==\"${OPT_MACHINE}\").metadata.labels.\"machine.openshift.io/instance-type\"" \
+         | select (.metadata.name==\"${machine_name}\").metadata.labels.\"machine.openshift.io/instance-type\"" \
          "${CACHE_FILE_MACHINES}")
 
     if [[ "${machine_type_cloud}" != "${OPT_SIZE}" ]]; then
