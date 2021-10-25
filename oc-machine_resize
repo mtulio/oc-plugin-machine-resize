@@ -284,10 +284,10 @@ cache_update_get_etcd() {
     set +o pipefail
     set +o errexit
     oc -n openshift-etcd exec \
-        $(oc get pods \
+        "$(oc get pods \
             -n openshift-etcd \
             -l app=etcd \
-            -o jsonpath='{.items[0].metadata.name}') \
+            -o jsonpath='{.items[0].metadata.name}')" \
         -- etcdctl endpoint status -w json 2>/dev/null > "${CACHE_ETCD}" || true
 
     set -o pipefail
@@ -673,7 +673,8 @@ check_etcd_has_leader() {
     local node_leaders
     echo -ne " > Checking if etcd has a leader..."
 
-    node_leaders=($(cache_get_etcd_field_isleader))
+    #node_leaders=($(cache_get_etcd_field_isleader))
+    mapfile -t node_leaders < <(cache_get_etcd_field_isleader)
     has_leader=false
 
     for leader_st in  ${node_leaders[@]}; do
