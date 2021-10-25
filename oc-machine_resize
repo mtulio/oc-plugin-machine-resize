@@ -13,67 +13,99 @@ set -o errexit
 # Global
 # ######
 
-declare -g CACHE_DIR="${HOME}/.cache/oc_plugin-machine-resize"
-declare -g CACHE_FILE_MACHINES="${CACHE_DIR}/machines.json"
-declare -g CACHE_FILE_NODES="${CACHE_DIR}/nodes.json"
-declare -g CACHE_ETCD="${CACHE_DIR}/etcd-endpoint.json"
-declare -g CACHE_CO="${CACHE_DIR}/cluster-operators.json"
+declare -g CACHE_DIR
+declare -g CACHE_FILE_MACHINES
+declare -g CACHE_FILE_NODES
+declare -g CACHE_ETCD
+declare -g CACHE_CO
 
-declare -g HANDLER_MACHINE=false
-declare -g HANDLER_SIZE=false
-declare -g HANDLER_LSSIZE=false
-declare -g HANDLER_LIST=false
+declare -g HANDLER_MACHINE
+declare -g HANDLER_SIZE
+declare -g HANDLER_LSSIZE
+declare -g HANDLER_LIST
 
-declare -g RT_RESP=false
-declare -g RT_YES=true
-declare -g RT_NO=false
+declare -g RT_RESP
+declare -g RT_YES
+declare -g RT_NO
 
-declare -g OPT_MACHINE=""
-declare -g OPT_SIZE=""
-declare -g OPT_CONTINUE=false
-declare -g OPT_FORCE=false
+declare -g OPT_MACHINE
+declare -g OPT_SIZE
+declare -g OPT_CONTINUE
+declare -g OPT_FORCE
 
-declare -g CLI_OC=$(command -v oc)
-declare -g CLI_AWS=$(command -v aws)
-declare -g CLI_AZ=$(command -v az)
-declare -g CLI_JQ=$(command -v jq)
+declare -g CLI_OC
+declare -g CLI_AWS
+declare -g CLI_AZ
+declare -g CLI_JQ
+
+declare -g CLOUD_PROVIDER
+declare -g KEY_PATH_MACHINE_TYPE
+declare -g KEY_MACHINE_TYPE
+declare -g KEY_PATH_MACHINE_ID
+
+set_defaults_glob() {
+    CACHE_DIR="${HOME}/.cache/oc_plugin-machine-resize"
+    CACHE_FILE_MACHINES="${CACHE_DIR}/machines.json"
+    CACHE_FILE_NODES="${CACHE_DIR}/nodes.json"
+    CACHE_ETCD="${CACHE_DIR}/etcd-endpoint.json"
+    CACHE_CO="${CACHE_DIR}/cluster-operators.json"
+
+    HANDLER_MACHINE=false
+    HANDLER_SIZE=false
+    HANDLER_LSSIZE=false
+    HANDLER_LIST=false
+
+    RT_RESP=false
+    RT_YES=true
+    RT_NO=false
+
+    OPT_MACHINE=""
+    OPT_SIZE=""
+    OPT_CONTINUE=false
+    OPT_FORCE=false
+
+    CLI_OC=$(command -v oc)
+    CLI_AWS=$(command -v aws)
+    CLI_AZ=$(command -v az)
+    CLI_JQ=$(command -v jq)
+}
 
 set_dep_cloud() {
     # Cloud specifics
-    declare -g CLOUD_PROVIDER=$(oc get infrastructures \
+    CLOUD_PROVIDER=$(oc get infrastructures \
         -o jsonpath='{.items[*].status.platformStatus.type}' \
         | tr '[:upper:]' '[:lower:]')
 
     # Globals by Cloud (and avoid if statements on code)
     if [[ "${CLOUD_PROVIDER}" == "aws" ]]; then
-        declare -g KEY_PATH_MACHINE_TYPE=".spec.providerSpec.value.instanceType"
-        declare -g KEY_MACHINE_TYPE="instanceType"
-        declare -g KEY_PATH_MACHINE_ID=".status.providerStatus.instanceId"
+        KEY_PATH_MACHINE_TYPE=".spec.providerSpec.value.instanceType"
+        KEY_MACHINE_TYPE="instanceType"
+        KEY_PATH_MACHINE_ID=".status.providerStatus.instanceId"
 
     elif [[ "${CLOUD_PROVIDER}" == "azure" ]]; then
-        declare -g KEY_PATH_MACHINE_TYPE=".spec.providerSpec.value.vmSize"
-        declare -g KEY_MACHINE_TYPE="vmSize"
-        declare -g KEY_PATH_MACHINE_ID=".status.providerStatus.vmId"
+        KEY_PATH_MACHINE_TYPE=".spec.providerSpec.value.vmSize"
+        KEY_MACHINE_TYPE="vmSize"
+        KEY_PATH_MACHINE_ID=".status.providerStatus.vmId"
     fi
 }
 
 check_dep_required() {
-    test -d ${CACHE_DIR} || mkdir -p ${CACHE_DIR}
-    test -x ${CLI_JQ} || (
+    test -d "${CACHE_DIR}" || mkdir -p "${CACHE_DIR}"
+    test -x "${CLI_JQ}" || (
         echo "ERROR: unable to find the 'jq' executable on your PATH. [${CLI_JQ}]"; 
         exit 1
     )
-    test -x ${CLI_OC} || (
+    test -x "${CLI_OC}" || (
         echo "ERROR: unable to find the 'oc' executable on your PATH. [${CLI_OC}]"; 
         exit 1
     )
     if [[ "${CLOUD_PROVIDER}" == "aws" ]]; then
-        test -x ${CLI_AWS} || (
+        test -x "${CLI_AWS}" || (
             echo "ERROR: unable to find the 'aws' executable on your PATH. [${CLI_AWS}]"; 
             exit 1
         )
     elif [[ "${CLOUD_PROVIDER}" == "azure" ]]; then
-        test -x ${CLI_AZ} || (
+        test -x "${CLI_AZ}" || (
             echo "ERROR: unable to find the 'az' executable on your PATH. [${CLI_AZ}]"; 
             exit 1
         )
@@ -88,35 +120,43 @@ check_dep_required() {
 # ###
 
 cache_get_machine_id() {
-    local machine_name=${1:-${OPT_MACHINE}}
-    local resp=$(jq -r ".items[] \
+    local machine_name
+    local resp
+    machine_name="${1:-${OPT_MACHINE}}"
+    resp=$(jq -r ".items[] \
         | select (.metadata.name==\"${machine_name}\")${KEY_PATH_MACHINE_ID}" \
-        ${CACHE_FILE_MACHINES})
-    echo ${resp}
+        "${CACHE_FILE_MACHINES}")
+
+    echo "${resp}"
 }
 
 aws_get_instance_state() {
-    local machine_name=${1:-${OPT_MACHINE}}
-    local instance_id=$(cache_get_machine_id ${machine_name})
-    local current_state=$(aws ec2 describe-instance-status \
-        --instance-id ${instance_id} \
+    local instance_id
+    local current_state
+    instance_id=$(cache_get_machine_id "${OPT_MACHINE}")
+    current_state=$(aws ec2 describe-instance-status \
+        --instance-id "${instance_id}" \
         | jq -r '.InstanceStatuses[0].InstanceState.Name')
 
-    if [[ ${current_state} == "null" ]]; then
+    if [[ "${current_state}" == "null" ]]; then
         echo "not_running"
         return
     fi
-    echo ${current_state}
+    echo "${current_state}"
     return
 }
 
 
 aws_change_instance_type() {
-    local machine_name=${1:-${OPT_MACHINE}}
-    local instance_id=$(cache_get_machine_id ${machine_name})
-    local sl_time_sec=30
-    local sl_time_total=10
-    local sl_time_count=1
+    local instance_id
+    local sl_time_sec
+    local sl_time_total
+    local sl_time_count
+
+    instance_id=$(cache_get_machine_id "${OPT_MACHINE}")
+    sl_time_sec=30
+    sl_time_total=10
+    sl_time_count=1
 
     # Avoid error running modify right after Instance is stopped
     # API ERR: An error occurred (IncorrectInstanceState) when \
@@ -128,8 +168,8 @@ aws_change_instance_type() {
     set +o errexit
     while true; do
         aws ec2 modify-instance-attribute \
-            --instance-id ${instance_id} \
-            --instance-type ${OPT_SIZE}
+            --instance-id "${instance_id}" \
+            --instance-type "${OPT_SIZE}"
         RC=$?
         if [[ ${RC} -eq 0 ]]; then
             echo " >> SUCCESS: type changed from Cloud Provider"
@@ -150,11 +190,12 @@ aws_change_instance_type() {
 }
 
 aws_power_on_instance() {
-    local machine_name=${1:-${OPT_MACHINE}}
-    local instance_id=$(cache_get_machine_id ${machine_name})
+    local instance_id
+    instance_id=$(cache_get_machine_id "${OPT_MACHINE}")
+
     echo " >> Starting EC2..."
     aws ec2 start-instances \
-        --instance-ids ${instance_id}
+        --instance-ids "${instance_id}"
 }
 
 # #####
@@ -162,13 +203,18 @@ aws_power_on_instance() {
 # #####
 
 azure_get_vm_state() {
-    local machine_name=${1:-${OPT_MACHINE}}
-    local resource_group=$(cache_get_az_resource_group)
-    local current_state=$(az vm get-instance-view \
-        --resource-group ${resource_group} \
-        --name ${machine_name} \
+    local machine_name
+    local resource_group
+    local current_state
+
+    machine_name="${OPT_MACHINE}"
+    resource_group=$(cache_get_az_resource_group)
+    current_state=$(az vm get-instance-view \
+        --resource-group "${resource_group}" \
+        --name "${machine_name}" \
         --output json \
         | jq -re '.instanceView.statuses[] | select( .code | startswith("PowerState") ).code')
+
 
     if [[ ${current_state} == "PowerState/stopped" ]]; then
         echo "not_running"
@@ -178,27 +224,37 @@ azure_get_vm_state() {
         echo "running"
         return
     fi
-    echo ${current_state}
+
+    echo "${current_state}"
     return
 }
 
 azure_change_vm_size() {
-    local machine_name=${1:-${OPT_MACHINE}}
-    local instance_id=$(cache_get_machine_id ${machine_name})
-    local resource_group=$(cache_get_az_resource_group)
+    local machine_name
+    local instance_id
+    local resource_group
+
+    machine_name="${OPT_MACHINE}"
+    instance_id=$(cache_get_machine_id "${machine_name}")
+    resource_group=$(cache_get_az_resource_group)
+
     az vm resize \
-        --resource-group ${resource_group} \
-        --name ${machine_name} \
-        --size ${OPT_SIZE}
+        --resource-group "${resource_group}" \
+        --name "${machine_name}" \
+        --size "${OPT_SIZE}"
 }
 
 azure_power_on_vm() {
-    local machine_name=${1:-${OPT_MACHINE}}
-    local resource_group=$(cache_get_az_resource_group)
+    local machine_name
+    local resource_group
+
+    machine_name="${OPT_MACHINE}"
+    resource_group=$(cache_get_az_resource_group)
+
     echo " >> Starting Azure VM ${machine_name}..."
     az vm start \
-        --resource-group ${resource_group} \
-        --name ${machine_name} \
+        --resource-group "${resource_group}" \
+        --name "${machine_name}" \
         --output table
 }
 
@@ -210,17 +266,17 @@ cache_update_get_machines() {
     oc get machines \
         -n openshift-machine-api \
         -l machine.openshift.io/cluster-api-machine-role=master \
-        -o json > ${CACHE_FILE_MACHINES}
+        -o json > "${CACHE_FILE_MACHINES}"
 }
 
 cache_update_get_nodes() {
     oc get nodes \
         -l kubernetes.io/os=linux,node-role.kubernetes.io/master= \
-        -o json > ${CACHE_FILE_NODES}
+        -o json > "${CACHE_FILE_NODES}"
 }
 
 cache_update_get_co() {
-    oc get co -o json > ${CACHE_CO}
+    oc get co -o json > "${CACHE_CO}"
 }
 
 cache_update_get_etcd() {
@@ -228,30 +284,36 @@ cache_update_get_etcd() {
     set +o pipefail
     set +o errexit
     oc -n openshift-etcd exec \
-        $(oc get pods \
+        "$(oc get pods \
             -n openshift-etcd \
             -l app=etcd \
-            -o jsonpath='{.items[0].metadata.name}') \
-        -- etcdctl endpoint status -w json 2>/dev/null > ${CACHE_ETCD} || true
+            -o jsonpath='{.items[0].metadata.name}')" \
+        -- etcdctl endpoint status -w json 2>/dev/null > "${CACHE_ETCD}" || true
 
     set -o pipefail
     set -o errexit
 }
 
 cache_get_node_name() {
-    local machine_name=${1:-${OPT_MACHINE}}
+    local machine_name
+    machine_name="${1:-${OPT_MACHINE}}"
+
     jq -r ".items[] \
         | select (.metadata.name==\"${machine_name}\").status.nodeRef.name" \
-        ${CACHE_FILE_MACHINES}
+        "${CACHE_FILE_MACHINES}"
 }
 
 cache_get_node_status() {
-    local machine_name=${1:-${OPT_MACHINE}}
-    local node_name=$(cache_get_node_name ${machine_name})
-    local resp=$(jq -r ".items[] \
+    local node_name
+    local resp
+
+    node_name=$(cache_get_node_name "${1:-${OPT_MACHINE}}")
+    resp=$(jq -r ".items[] \
         | select (.metadata.name==\"${node_name}\").status.conditions[] \
         | select (.type==\"Ready\").status" \
-        ${CACHE_FILE_NODES})
+        "${CACHE_FILE_NODES}")
+
+
     if [[ "${resp}" == "Unknown" ]]; then
         echo "NotReady"
         return
@@ -264,39 +326,49 @@ cache_get_node_status() {
 }
 
 cache_get_machine_phase() {
-    local machine_name=${1:-${OPT_MACHINE}}
+    local machine_name
+    machine_name="${1:-${OPT_MACHINE}}"
+
     jq -r ".items[] \
         | select (.metadata.name==\"${machine_name}\").status.phase" \
-        ${CACHE_FILE_MACHINES}
+        "${CACHE_FILE_MACHINES}"
 }
 
 cache_get_machine_node_ip() {
-    local machine_name=${1:-${OPT_MACHINE}}
+    local machine_name
+    machine_name="${1:-${OPT_MACHINE}}"
+
     jq -r ".items[] \
         | select (.metadata.name==\"${machine_name}\").status.addresses[] \
         | select (.type==\"InternalIP\").address " \
-        ${CACHE_FILE_MACHINES}
+        "${CACHE_FILE_MACHINES}"
 }
 
 cache_get_machine_size_cloud() {
-    local machine_name=${1:-${OPT_MACHINE}}
+    local machine_name
+    machine_name="${1:-${OPT_MACHINE}}"
+
     jq -r ".items[] \
         | select (\
             .metadata.name==\"${machine_name}\"\
         ).metadata.labels.\"machine.openshift.io/instance-type\"" \
-        ${CACHE_FILE_MACHINES}
+        "${CACHE_FILE_MACHINES}"
 }
 
 cache_get_etcd_field_isleader() {
-    jq -r '.[] | ( .Status.header.member_id == .Status.leader  )' ${CACHE_ETCD}
+    jq -r ".[] | ( .Status.header.member_id == .Status.leader  )" \
+        "${CACHE_ETCD}"
 }
 
 cache_get_az_resource_group() {
+    local machine_name
+    machine_name="${1:-${OPT_MACHINE}}"
+
     jq -r ".items[] \
             | select (\
                 .metadata.name==\"${machine_name}\"\
               ).spec.providerSpec.value.resourceGroup" \
-            ${CACHE_FILE_MACHINES}
+            "${CACHE_FILE_MACHINES}"
 }
 
 # ##########
@@ -304,8 +376,8 @@ cache_get_az_resource_group() {
 # ##########
 
 run_oc_cordon_node() {
-    local machine_name=${OPT_MACHINE}
-    local node_name=$(cache_get_node_name ${machine_name})
+    local node_name
+    node_name=$(cache_get_node_name "${OPT_MACHINE}")
     
     echo -e " > Cordoning the node [${node_name}]..."
     if [[ "$(cache_get_node_status)" != "Ready" ]]; then
@@ -313,15 +385,15 @@ run_oc_cordon_node() {
         RT_RESP=${RT_YES}
         return
     fi
-    oc adm cordon ${node_name}
+    oc adm cordon "${node_name}"
 
     echo -ne " > Node Cordoned [${node_name}]..."
     RT_RESP=${RT_YES}
 }
 
 run_oc_uncordon_node() {
-    local machine_name=${OPT_MACHINE}
-    local node_name=$(cache_get_node_name ${machine_name})
+    local node_name
+    node_name=$(cache_get_node_name "${OPT_MACHINE}")
     
     echo -e " > UnCordoning the node [${node_name}]..."
     if [[ "$(cache_get_node_status)" != "Ready" ]]; then
@@ -329,15 +401,15 @@ run_oc_uncordon_node() {
         RT_RESP=${RT_YES}
         return
     fi
-    oc adm uncordon ${node_name}
+    oc adm uncordon "${node_name}"
 
     echo -ne " >> Node Uncordoned [${node_name}]..."
     RT_RESP=${RT_YES}
 }
 
 run_oc_drain_node() {
-    local machine_name=${OPT_MACHINE}
-    local node_name=$(cache_get_node_name ${machine_name})
+    local node_name
+    node_name=$(cache_get_node_name "${OPT_MACHINE}")
     
     echo -e " > Draining the node [${node_name}]..."
     if [[ "$(cache_get_node_status)" != "Ready" ]]; then
@@ -345,7 +417,7 @@ run_oc_drain_node() {
         RT_RESP=${RT_YES}
         return
     fi
-    oc adm drain ${node_name} \
+    oc adm drain "${node_name}" \
         --ignore-daemonsets \
         --grace-period=60 \
         --delete-local-data || (
@@ -359,8 +431,8 @@ run_oc_drain_node() {
 }
 
 run_machine_power_off() {
-    local machine_name=${OPT_MACHINE}
-    local node_name=$(cache_get_node_name ${machine_name})
+    local node_name
+    node_name=$(cache_get_node_name "${OPT_MACHINE}")
 
     echo -e " > Powering off the node [${node_name}]..."
     if [[ "$(cache_get_node_status)" != "Ready" ]]; then
@@ -369,7 +441,7 @@ run_machine_power_off() {
         return
     fi
 
-    oc debug node/${node_name} -- chroot /host shutdown -h 1 || true
+    oc debug node/"${node_name}" -- chroot /host shutdown -h 1 || true
 
     echo -ne " > Shutdown command was sent to node [${node_name}]..."
     RT_RESP=${RT_YES}
@@ -377,13 +449,14 @@ run_machine_power_off() {
 }
 
 run_wait_node_notready() {
-    local machine_name=${OPT_MACHINE}
-    local node_name=$(cache_get_node_name ${machine_name})
-    echo -e " > Waiting the node be NotReady..."
+    local node_name
+    local node_status
+    node_name=$(cache_get_node_name "${OPT_MACHINE}")
 
+    echo -e " > Waiting the node be NotReady..."
     while true; do
         cache_update_get_nodes
-        local node_status=$(cache_get_node_status)
+        node_status=$(cache_get_node_status)
         if [[ ${node_status} != "Ready" ]]; then
             echo " >> Node is NotReady [${node_status}]...continuing the process...";
             RT_RESP=${RT_YES}
@@ -396,13 +469,14 @@ run_wait_node_notready() {
 }
 
 run_wait_node_ready() {
-    local machine_name=${OPT_MACHINE}
-    local node_name=$(cache_get_node_name ${machine_name})
-    echo -e " > Waiting the node be Ready..."
+    local node_name
+    local node_status
+    node_name=$(cache_get_node_name "${OPT_MACHINE}")
 
+    echo -e " > Waiting the node be Ready..."
     while true; do
         cache_update_get_nodes
-        local node_status=$(cache_get_node_status)
+        node_status=$(cache_get_node_status)
         if [[ ${node_status} == "Ready" ]]; then
             echo " >> Node is Ready [${node_status}]...continuing the process...";
             RT_RESP=${RT_YES}
@@ -422,7 +496,7 @@ run_wait_node_stopped() {
         elif [[ "${CLOUD_PROVIDER}" == "azure" ]]; then
             st=$(azure_get_vm_state)
         fi
-        test $st == "not_running" && break;
+        test "${st}" == "not_running" && break;
         echo " >> Instance still running [$st]; sleeping 15s"
         sleep 15;
     done
@@ -438,7 +512,7 @@ run_wait_node_started() {
         elif [[ "${CLOUD_PROVIDER}" == "azure" ]]; then
             st=$(azure_get_vm_state)
         fi
-        test $st == "running" && break;
+        test "${st}" == "running" && break;
         echo " >> Instance still not running [$st]; sleeping 15s"
         sleep 15;
     done
@@ -467,10 +541,13 @@ run_change_instance_type() {
 }
 
 run_wait_machine_reconciliation() {
-    local machine_name=${OPT_MACHINE}
+    local machine_name
+    local machine_size
+    machine_name=${OPT_MACHINE}
+
     while true; do 
         cache_update_get_machines
-        local machine_size=$(cache_get_machine_size_cloud ${machine_name})
+        machine_size=$(cache_get_machine_size_cloud "${machine_name}")
         test "${machine_size}" == "${OPT_SIZE}" && break;
         echo " >> Instance size was not updated [${machine_size}]; sleeping 15s"
         sleep 15;
@@ -480,8 +557,11 @@ run_wait_machine_reconciliation() {
 }
 
 run_patch_machine_size() {
-    local machine_name=${OPT_MACHINE}
-    local machine_size_cloud=$(cache_get_machine_size_cloud ${machine_name})
+    local machine_name
+    local machine_size_cloud
+
+    machine_name="${OPT_MACHINE}"
+    machine_size_cloud=$(cache_get_machine_size_cloud "${machine_name}")
 
     echo -e " > Starting the Machine Size patch..."
     echo -e " >> Check target: target=[${OPT_SIZE}] machine_cloud=[${machine_size_cloud}]"
@@ -490,7 +570,7 @@ run_patch_machine_size() {
         exit 1
     fi
 
-    oc patch machine ${machine_name} \
+    oc patch machine "${machine_name}" \
         -n openshift-machine-api \
         --type=merge \
         -p "{\"spec\":{\"providerSpec\":{\"value\":{\"${KEY_MACHINE_TYPE}\":\"${OPT_SIZE}\"}}}}"
@@ -506,15 +586,19 @@ run_patch_machine_size() {
 
 # Check if a given IP is a etcd leader, return a boolean with true for leader.
 check_etcd_leader_by_ip() {
-    local check_ip="$1"
-    local resp=$(
+    local check_ip
+    local resp
+
+    check_ip="$1"
+    resp=$(
         jq -r ".[] | \
             {
                 endpoint_ip: ( .Endpoint | capture(\"https://(?<ip>[[:digit:]].+):2379\").ip ),\
                 member_id: ( .Status.header.member_id),\
                 is_leader: ( .Status.header.member_id == .Status.leader)\
-            }" ${CACHE_ETCD} \
+            }" "${CACHE_ETCD}" \
             | jq -r ". | select(.endpoint_ip==\"${check_ip}\").is_leader")
+
     if [[ -z "${resp}" ]]; then
         echo "false"
         return
@@ -524,12 +608,17 @@ check_etcd_leader_by_ip() {
 }
 
 check_machine_was_not_resized_cloud() {
+    local machine_name
+    local machine_type_cloud
+    local machine_type_spec
+
     echo -ne " > Checking ig machine was already resized on Cloud provider..."
-    local machine_name=${1:-${OPT_MACHINE}}
-    local machine_type_cloud=$(jq -r \
+
+    machine_name="${OPT_MACHINE}"
+    machine_type_cloud=$(jq -r \
         ".items[] \
-         | select (.metadata.name==\"${OPT_MACHINE}\").metadata.labels.\"machine.openshift.io/instance-type\"" \
-         ${CACHE_FILE_MACHINES})
+         | select (.metadata.name==\"${machine_name}\").metadata.labels.\"machine.openshift.io/instance-type\"" \
+         "${CACHE_FILE_MACHINES}")
 
     if [[ "${machine_type_cloud}" != "${OPT_SIZE}" ]]; then
         RT_RESP=${RT_YES}
@@ -537,12 +626,12 @@ check_machine_was_not_resized_cloud() {
     fi
 
     # check if the process was started
-    local machine_type_spec=$(\
+    machine_type_spec=$(\
         jq -r ".items[] | \
             select (\
                 .metadata.name==\"${machine_name}\"\
             )${KEY_PATH_MACHINE_TYPE}" \
-        ${CACHE_FILE_MACHINES})
+        "${CACHE_FILE_MACHINES}")
 
     if [[ "${machine_type_spec}" == "${OPT_SIZE}" ]]; then
         echo "Machine was already resized."
@@ -556,9 +645,12 @@ check_machine_was_not_resized_cloud() {
 }
 
 check_node_is_ready() {
+    local node_status
+
     echo -ne " > Checking if Node is Ready..."
-    local node_status=$(cache_get_node_status)
-    if [[ ${node_status} == "Ready" ]]; then
+
+    node_status=$(cache_get_node_status)
+    if [[ "${node_status}" == "Ready" ]]; then
         RT_RESP=${RT_YES}
         return
     fi
@@ -566,9 +658,11 @@ check_node_is_ready() {
 }
 
 check_machine_is_running() {
+    local machine_phase
     echo -ne " > Checking if Machine is Running..."
-    local machine_phase=$(cache_get_machine_phase)
-    if [[ ${machine_phase} == "Running" ]]; then
+
+    machine_phase=$(cache_get_machine_phase)
+    if [[ "${machine_phase}" == "Running" ]]; then
         RT_RESP=${RT_YES}
         return
     fi
@@ -576,11 +670,13 @@ check_machine_is_running() {
 }
 
 check_etcd_has_leader() {
+    local node_leaders
     echo -ne " > Checking if etcd has a leader..."
-    local node_leaders=($(cache_get_etcd_field_isleader))
 
+    mapfile -t node_leaders < <(cache_get_etcd_field_isleader)
     has_leader=false
-    for leader_st in  ${node_leaders[@]}; do
+
+    for leader_st in "${node_leaders[@]}"; do
         if [[ ${leader_st} == true ]]; then
             has_leader=true
             break
@@ -594,9 +690,14 @@ check_etcd_has_leader() {
 }
 
 check_etcd_has_only_one_leader() {
+    local node_leaders
+    local cnt_leaders
+
     echo -ne " > Checking if etcd has only one leader..."
-    local node_leaders=($(cache_get_etcd_field_isleader))
-    local cnt_leaders=$(echo ${etcd_leaders[@]} |tr ' ' '\n' |uniq -c |grep true |awk '{print$1}')
+
+    mapfile -t node_leaders < <(cache_get_etcd_field_isleader)
+    cnt_leaders=$(echo "${node_leaders[@]}" |tr ' ' '\n' |uniq -c |grep true |awk '{print$1}')
+
     if [[ ${cnt_leaders} -eq 1 ]] ; then
         RT_RESP=${RT_YES}
         return
@@ -605,9 +706,13 @@ check_etcd_has_only_one_leader() {
 }
 
 check_etcd_machine_is_not_leader() {
+    local machine_ip
+    local is_etcd_leader
+
     echo -ne " > Checking if Machine is not a etcd leader..."
-    local machine_ip=$(cache_get_machine_node_ip ${OPT_MACHINE})
-    local is_etcd_leader=$(check_etcd_leader_by_ip ${machine_ip})
+
+    machine_ip=$(cache_get_machine_node_ip "${OPT_MACHINE}")
+    is_etcd_leader=$(check_etcd_leader_by_ip "${machine_ip}")
     if [[ ${is_etcd_leader} == false ]]; then
         RT_RESP=${RT_YES}
         return
@@ -618,7 +723,8 @@ check_etcd_machine_is_not_leader() {
 
 #> Check resps
 check_resp() {
-    local resp=$1
+    local resp
+    resp=${1}
 
     # Test(s) success or failed
     if [[ "${resp}" == "${RT_YES}" ]]; then
@@ -630,7 +736,8 @@ check_resp() {
 }
 
 check_resp_cont() {
-    local resp=$1
+    local resp
+    resp=${1}
 
     # Tests failed but --continue=true
     if [[ "${OPT_CONTINUE:-}" == false ]] && [[ "${resp}" == "${RT_NO}" ]]; then
@@ -642,14 +749,15 @@ check_resp_cont() {
         return
     fi
     #echo ">> ${resp}"
-    check_resp ${RT_YES}
+    check_resp "${RT_YES}"
 }
 
 check_resp_force() {
-    local resp=$1
+    local resp
+    resp=${1}
 
     # Tests failed but --force=true
-    if [[ "${OPT_FORCE:-}" == false ]] && [[ ${resp} == ${RT_NO} ]]; then
+    if [[ "${OPT_FORCE:-}" == false ]] && [[ "${resp}" == "${RT_NO}" ]]; then
         echo "FAIL. --force flag was not set."
         exit 1
     fi
@@ -657,7 +765,7 @@ check_resp_force() {
         echo "FAIL. --force flag was set. Skiping FAIL state."
         return
     fi
-    check_resp ${resp}
+    check_resp "${resp}"
 }
 
 # ###
@@ -670,21 +778,21 @@ resize_machine_runner() {
 
     # Check if Machine was already resized (TYPE_CLOUD==--size)
     # '-> Check if Machine was already resized (TYPE_SPEC==--size) if not -> patch Machine
-    check_machine_was_not_resized_cloud; check_resp ${RT_RESP}
+    check_machine_was_not_resized_cloud; check_resp "${RT_RESP}"
 
     # Check Node is Ready (--continue)
-    check_node_is_ready; check_resp_cont ${RT_RESP}
+    check_node_is_ready; check_resp_cont "${RT_RESP}"
 
     # Check Machine is Running (--continue)
-    check_machine_is_running; check_resp_cont ${RT_RESP}
+    check_machine_is_running; check_resp_cont "${RT_RESP}"
 
     # Check if etcd cluster has a leader (ca we use forced flag?)
-    check_etcd_has_leader; check_resp_force ${RT_RESP}
+    check_etcd_has_leader; check_resp_force "${RT_RESP}"
 
     # Check if etcd cluster has only one leader (?)
     
     # Check if machine it's not a etcd_leader (otherwise --force)
-    check_etcd_machine_is_not_leader; check_resp_force ${RT_RESP}
+    check_etcd_machine_is_not_leader; check_resp_force "${RT_RESP}"
 
     # Validation complete
     echo " > ALl validation was complete, starting the resize..."
@@ -693,13 +801,13 @@ resize_machine_runner() {
     # ToDo
 
     # cordon node
-    run_oc_cordon_node; check_resp_force ${RT_RESP}
+    run_oc_cordon_node; check_resp_force "${RT_RESP}"
 
     # drain node
-    run_oc_drain_node; check_resp_force ${RT_RESP}
+    run_oc_drain_node; check_resp_force "${RT_RESP}"
 
     # shutdown node
-    run_machine_power_off; check_resp ${RT_RESP}
+    run_machine_power_off; check_resp "${RT_RESP}"
 
     # wait until node is NotReady
     run_wait_node_notready;
@@ -720,7 +828,7 @@ resize_machine_runner() {
     run_wait_node_ready;
 
     # uncordon
-    run_oc_uncordon_node; check_resp ${RT_RESP}
+    run_oc_uncordon_node; check_resp "${RT_RESP}"
 
     # wait Machine is Reconciled (TYPE_CLOUD==--size)
     run_wait_machine_reconciliation
@@ -765,28 +873,28 @@ cmd_list_machines() {
         "TYPE_SPEC" "TYPE_PROVIDER" "RESOURCE_GROUP" \
         "ETCD_LEADER"
 
-    for machine_name in $(jq -r '.items[].metadata.name' ${CACHE_FILE_MACHINES}); do
-        node_name=$(cache_get_node_name ${machine_name})
-        node_status=$(cache_get_node_status ${machine_name})
+    for machine_name in $(jq -r '.items[].metadata.name' "${CACHE_FILE_MACHINES}"); do
+        node_name=$(cache_get_node_name "${machine_name}")
+        node_status=$(cache_get_node_status "${machine_name}")
 
-        machine_ip=$(cache_get_machine_node_ip ${machine_name})
-        machine_id=$(cache_get_machine_id ${machine_name})
-        machine_phase=$(cache_get_machine_phase ${machine_name})
-        machine_type_spec=$(jq -r ".items[] |select (.metadata.name==\"${machine_name}\")${KEY_PATH_MACHINE_TYPE}" ${CACHE_FILE_MACHINES})
-        machine_type_cloud=$(cache_get_machine_size_cloud ${machine_name})
+        machine_ip=$(cache_get_machine_node_ip "${machine_name}")
+        machine_id=$(cache_get_machine_id "${machine_name}")
+        machine_phase=$(cache_get_machine_phase "${machine_name}")
+        machine_type_spec=$(jq -r ".items[] |select (.metadata.name==\"${machine_name}\")${KEY_PATH_MACHINE_TYPE}" "${CACHE_FILE_MACHINES}")
+        machine_type_cloud=$(cache_get_machine_size_cloud "${machine_name}")
         resource_group="\tN/A\t"
-        etcd_leader=$(check_etcd_leader_by_ip ${machine_ip})
+        etcd_leader=$(check_etcd_leader_by_ip "${machine_ip}")
         
         if [[ "${CLOUD_PROVIDER}" == "azure" ]]; then
-            machine_id=${machine_name}
-            resource_group=$(cache_get_az_resource_group)
+            machine_id="${machine_name}"
+            resource_group=$(cache_get_az_resource_group "${machine_name}")
         fi
 
         printf "%15s \t%15s \t%15s \t%10s \t%7s \t%10s \t%10s \t%10s \t%10s\n" \
-            ${machine_name} ${machine_id} ${node_name} \
-            ${machine_phase} ${node_status} \
-            ${machine_type_spec} ${machine_type_cloud} ${resource_group} \
-            ${etcd_leader}
+            "${machine_name}" "${machine_id}" "${node_name}" \
+            "${machine_phase}" "${node_status}" \
+            "${machine_type_spec}" "${machine_type_cloud}" "${resource_group}" \
+            "${etcd_leader}"
     done
     exit 0
 }
@@ -795,7 +903,9 @@ cmd_list_machines() {
 # MAIN
 # ####
 function show_help() {
-    local progname="oc machine-resize"
+    local progname
+    progname="oc machine-resize"
+
     cat <<-EOF
 Usage: ${0} [options]
 
@@ -829,7 +939,8 @@ EOF
 }
 
 function main() {
-    local cmd_target=""
+    local cmd_target
+    cmd_target=""
 
     if [[ ( ${HANDLER_MACHINE} == false ) && \
           ( ${HANDLER_SIZE} == true ) ]]; then
@@ -863,20 +974,18 @@ function main_cli() {
 
     # NOTE: This requires GNU getopt.
     # '-> On Mac OS X and FreeBSD need to be installed as: brew install gnu-getopt
-    GETOPT_SET=`getopt -n 'oc machine-resize' \
+    GETOPT_SET=$(getopt -n 'oc machine-resize' \
             -o hN:s:lLifc \
             --long help,machine-name:,size:,list-machines,list-sizes,install,force,continue \
-            -- "$@"`
-
-    if [ $? != 0 ] ; then
+            -- "$@")
+    RC=$?
+    if [ "${RC}" != 0 ] ; then
         echo "gnu-getopt seems not to be present. Please install it. Terminating..." >&2 ;
         exit 1 ;
     fi
     eval set -- "${GETOPT_SET}"
 
-    # run pre-req
-    
-
+    set_defaults_glob
     while true; do
         case "$1" in
             -h | --help          ) show_help; exit 2 ;;
@@ -890,15 +999,13 @@ function main_cli() {
                 HANDLER_LSSIZE=true ; shift ;;
             -f | --force         ) OPT_FORCE=true ; shift ;;
             -c | --continue      ) OPT_CONTINUE=true ; shift ;;
-            -v | --version       ) OPT_VERSION=true ; shift ;;
             -- ) shift; break ;;
             * ) echo "Option not found: $1"; break ;;
         esac
     done
 
     set_dep_cloud
-    check_dep_required;
-
+    check_dep_required
     main
 }
 
