@@ -978,8 +978,8 @@ function main_cli() {
             -o hN:s:lLifc \
             --long help,machine-name:,size:,list-machines,list-sizes,install,force,continue \
             -- "$@")
-
-    if [ $? != 0 ] ; then
+    RC=$?
+    if [ "${RC}" != 0 ] ; then
         echo "gnu-getopt seems not to be present. Please install it. Terminating..." >&2 ;
         exit 1 ;
     fi
