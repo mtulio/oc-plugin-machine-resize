@@ -673,7 +673,6 @@ check_etcd_has_leader() {
     local node_leaders
     echo -ne " > Checking if etcd has a leader..."
 
-    #node_leaders=($(cache_get_etcd_field_isleader))
     mapfile -t node_leaders < <(cache_get_etcd_field_isleader)
     has_leader=false
 
@@ -696,7 +695,7 @@ check_etcd_has_only_one_leader() {
 
     echo -ne " > Checking if etcd has only one leader..."
 
-    node_leaders=($(cache_get_etcd_field_isleader))
+    mapfile -t node_leaders < <(cache_get_etcd_field_isleader)
     cnt_leaders=$(echo ${etcd_leaders[@]} |tr ' ' '\n' |uniq -c |grep true |awk '{print$1}')
 
     if [[ ${cnt_leaders} -eq 1 ]] ; then
