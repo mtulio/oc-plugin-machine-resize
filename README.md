@@ -67,11 +67,14 @@ oc machine-resize -N mrb-gptgl-master-0 -s m5.xlarge --force
 
 ### Cast: resizing master node that host the etcd leader pod
 
-<script id="asciicast-440747" src="https://asciinema.org/a/440747.js" async></script>
+
+[![asciicast](https://asciinema.org/a/440747.svg)](https://asciinema.org/a/440747)
+
 
 ### Cast: resizing the node on Azure
 
-<script id="asciicast-443591" src="https://asciinema.org/a/443591.js" async></script>
+
+[![asciicast](https://asciinema.org/a/443591.svg)](https://asciinema.org/a/443591)
 
 
 ## ToDo Next
