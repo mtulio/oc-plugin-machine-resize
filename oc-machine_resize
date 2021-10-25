@@ -999,7 +999,6 @@ function main_cli() {
                 HANDLER_LSSIZE=true ; shift ;;
             -f | --force         ) OPT_FORCE=true ; shift ;;
             -c | --continue      ) OPT_CONTINUE=true ; shift ;;
-            -v | --version       ) OPT_VERSION=true ; shift ;;
             -- ) shift; break ;;
             * ) echo "Option not found: $1"; break ;;
         esac
